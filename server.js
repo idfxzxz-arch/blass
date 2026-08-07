@@ -18,58 +18,92 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-let currentQR = null;
-let isConnected = false;
+const MAX_SLOTS = 2;
+const sessions = new Map(); 
 
-// Initialize WhatsApp Client with LocalAuth
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    }
-});
+function createClient(clientId, telegramChatId = null) {
+    if (sessions.has(clientId)) return sessions.get(clientId);
 
-// Event: QR code received
-client.on('qr', async (qr) => {
-    console.log('QR Code received. Waiting for scan...');
-    try {
-        currentQR = await qrcode.toDataURL(qr);
-        isConnected = false;
-    } catch (err) {
-        console.error('Error generating QR code:', err);
-    }
-});
+    const sessionData = {
+        client: null,
+        isConnected: false,
+        currentQR: null,
+        statusText: 'Initializing...'
+    };
+    sessions.set(clientId, sessionData);
 
-// Event: Client is ready (authenticated)
-client.on('ready', () => {
-    console.log('WhatsApp Client is ready!');
-    isConnected = true;
-    currentQR = null;
-});
+    const client = new Client({
+        authStrategy: new LocalAuth({ clientId }),
+        puppeteer: {
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu'
+            ]
+        }
+    });
+    sessionData.client = client;
 
-// Event: Client disconnected
-client.on('disconnected', (reason) => {
-    console.log('WhatsApp Client was disconnected:', reason);
-    isConnected = false;
-    client.destroy();
+    client.on('qr', async (qr) => {
+        console.log(`[${clientId}] QR Code received.`);
+        try {
+            sessionData.currentQR = await qrcode.toDataURL(qr);
+            sessionData.isConnected = false;
+            sessionData.statusText = 'Menunggu Scan QR';
+
+            if (telegramChatId && bot) {
+                const base64Data = sessionData.currentQR.replace(/^data:image\/png;base64,/, "");
+                const imageBuffer = Buffer.from(base64Data, 'base64');
+                bot.sendPhoto(telegramChatId, imageBuffer, { caption: 'Scan QR Code ini menggunakan WhatsApp Anda.' }).catch(e => console.error(e));
+            }
+        } catch (err) {
+            console.error(`[${clientId}] Error generating QR code:`, err);
+        }
+    });
+
+    client.on('ready', () => {
+        console.log(`[${clientId}] WhatsApp Client is ready!`);
+        sessionData.isConnected = true;
+        sessionData.currentQR = null;
+        sessionData.statusText = 'Terhubung';
+
+        if (telegramChatId && bot) {
+            bot.sendMessage(telegramChatId, '✅ WhatsApp berhasil terhubung! Anda sudah bisa memakai perintah /send.');
+        }
+    });
+
+    client.on('disconnected', (reason) => {
+        console.log(`[${clientId}] WhatsApp Client was disconnected:`, reason);
+        sessionData.isConnected = false;
+        sessionData.statusText = 'Terputus';
+        if (telegramChatId && bot) {
+            bot.sendMessage(telegramChatId, '❌ WhatsApp Anda terputus. Silakan /login kembali.');
+        }
+        client.destroy();
+        sessions.delete(clientId);
+    });
+
     client.initialize();
-});
+    return sessionData;
+}
 
-// Start the client
-client.initialize();
+function destroyClient(clientId) {
+    if (sessions.has(clientId)) {
+        const sessionData = sessions.get(clientId);
+        if (sessionData.client) {
+            sessionData.client.destroy();
+        }
+        sessions.delete(clientId);
+    }
+}
 
 // Initialize Telegram Bot
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.trim() : null;
-const ALLOWED_TELEGRAM_ID = process.env.ALLOWED_TELEGRAM_ID ? process.env.ALLOWED_TELEGRAM_ID.trim() : null;
 
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
@@ -78,55 +112,66 @@ if (TELEGRAM_BOT_TOKEN) {
 
     bot.onText(/\/(start|help)/, (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Telegram] Command /start received from Chat ID: ${chatId}`);
-        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) {
-            console.log(`[Telegram] Blocked /start from unauthorized ID: ${chatId}`);
-            return bot.sendMessage(chatId, '⛔ Anda tidak diizinkan menggunakan bot ini.');
-        }
-        const helpText = `*WhatsApp Sender Bot*\n\n` +
-            `/status - Cek status WhatsApp\n` +
-            `/qr - Dapatkan QR Code login\n` +
+        const helpText = `*WhatsApp Sender Bot (Sistem Slot)*\n\n` +
+            `/login - Mengambil slot dan mendapatkan QR Code\n` +
+            `/status - Cek status WhatsApp Anda\n` +
             `/send <nomor> <pesan> - Kirim pesan WA\n` +
-            `Contoh: /send 0812345678,0898765432 Halo ini pesan test!`;
+            `/logout - Logout dan melepaskan slot\n\n` +
+            `Bot ini maksimal melayani ${MAX_SLOTS} orang bersamaan.`;
         bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    });
+
+    bot.onText(/\/login/, async (msg) => {
+        const chatId = msg.chat.id;
+        const clientId = chatId.toString();
+
+        if (sessions.has(clientId)) {
+            return bot.sendMessage(chatId, '✅ Anda sudah memiliki sesi aktif. Ketik /status atau /logout.');
+        }
+
+        if (sessions.size >= MAX_SLOTS) {
+            return bot.sendMessage(chatId, '⛔ Maaf, semua slot saat ini sedang penuh. Silakan coba lagi nanti jika ada yang /logout.');
+        }
+
+        bot.sendMessage(chatId, '⏳ Mengalokasikan slot dan membuka browser... Mohon tunggu sekitar 20-30 detik untuk memunculkan QR.');
+        createClient(clientId, chatId);
+    });
+
+    bot.onText(/\/logout/, async (msg) => {
+        const chatId = msg.chat.id;
+        const clientId = chatId.toString();
+
+        if (!sessions.has(clientId)) {
+            return bot.sendMessage(chatId, 'Anda tidak memiliki sesi aktif.');
+        }
+
+        destroyClient(clientId);
+        bot.sendMessage(chatId, '✅ Anda berhasil logout dan slot Anda telah dibebaskan.');
     });
 
     bot.onText(/\/status/, (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Telegram] Command /status received from Chat ID: ${chatId}`);
-        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
-        
-        bot.sendMessage(chatId, isConnected ? '✅ WhatsApp Terhubung.' : '❌ WhatsApp Terputus. Ketik /qr untuk login.');
-    });
+        const clientId = chatId.toString();
 
-    bot.onText(/\/qr/, async (msg) => {
-        const chatId = msg.chat.id;
-        console.log(`[Telegram] Command /qr received from Chat ID: ${chatId}`);
-        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
-
-        if (isConnected) {
-            return bot.sendMessage(chatId, '✅ WhatsApp sudah terhubung, tidak perlu scan QR.');
-        }
-        if (!currentQR) {
-            return bot.sendMessage(chatId, '⏳ QR Code belum siap, silakan tunggu sebentar dan coba lagi.');
+        if (!sessions.has(clientId)) {
+            return bot.sendMessage(chatId, 'Anda belum mengambil slot. Ketik /login untuk mulai.');
         }
 
-        try {
-            const base64Data = currentQR.replace(/^data:image\/png;base64,/, "");
-            const imageBuffer = Buffer.from(base64Data, 'base64');
-            bot.sendPhoto(chatId, imageBuffer, { caption: 'Scan QR Code ini menggunakan WhatsApp Anda.' });
-        } catch (error) {
-            console.error('Error sending QR via Telegram:', error);
-            bot.sendMessage(chatId, 'Gagal mengirim QR Code.');
-        }
+        const sessionData = sessions.get(clientId);
+        bot.sendMessage(chatId, sessionData.isConnected ? '✅ WhatsApp Terhubung.' : `⏳ Status: ${sessionData.statusText}`);
     });
 
     bot.onText(/\/send\s+([\d,\s\+]+)\s+(.+)/, async (msg, match) => {
         const chatId = msg.chat.id;
-        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
+        const clientId = chatId.toString();
 
-        if (!isConnected) {
-            return bot.sendMessage(chatId, '❌ WhatsApp belum terhubung. Ketik /qr untuk login.');
+        if (!sessions.has(clientId)) {
+            return bot.sendMessage(chatId, 'Anda belum /login.');
+        }
+
+        const sessionData = sessions.get(clientId);
+        if (!sessionData.isConnected) {
+            return bot.sendMessage(chatId, '❌ WhatsApp Anda belum terhubung. Harap tunggu hingga terhubung.');
         }
 
         const toMatch = match[1];
@@ -152,7 +197,7 @@ if (TELEGRAM_BOT_TOKEN) {
                     formattedNumber += '@c.us';
                 }
 
-                await client.sendMessage(formattedNumber, message);
+                await sessionData.client.sendMessage(formattedNumber, message);
                 successCount++;
             } catch (error) {
                 console.error(`Telegram send error to ${number}:`, error.message);
@@ -164,31 +209,38 @@ if (TELEGRAM_BOT_TOKEN) {
     });
 }
 
-// API Endpoints
+// API Endpoints for Web UI (uses 'web' slot, bypassing MAX_SLOTS to keep it working)
 
 app.get('/status', (req, res) => {
+    const sessionData = sessions.get('web');
     res.json({
-        connected: isConnected
+        connected: sessionData ? sessionData.isConnected : false
     });
 });
 
 app.get('/qr', (req, res) => {
-    if (isConnected) {
+    let sessionData = sessions.get('web');
+    if (!sessionData) {
+        // Create Web session on demand (we don't count it against telegram slots to avoid breaking UI)
+        sessionData = createClient('web');
+    }
+
+    if (sessionData.isConnected) {
         return res.json({ success: false, error: 'Already connected' });
     }
-    if (!currentQR) {
+    if (!sessionData.currentQR) {
         return res.json({ success: false, error: 'QR not ready yet' });
     }
-    res.json({ success: true, qr: currentQR });
+    res.json({ success: true, qr: sessionData.currentQR });
 });
 
 app.post('/send-message', async (req, res) => {
-    if (!isConnected) {
+    const sessionData = sessions.get('web');
+    if (!sessionData || !sessionData.isConnected) {
         return res.status(403).json({ success: false, error: 'WhatsApp client is not connected' });
     }
 
     const { to, message } = req.body;
-
     if (!to || !message) {
         return res.status(400).json({ success: false, error: 'Nomor tujuan (to) dan pesan (message) diperlukan.' });
     }
@@ -202,11 +254,9 @@ app.post('/send-message', async (req, res) => {
     }
 
     const results = [];
-
     for (let number of recipients) {
         try {
-            let formattedNumber = number;
-            formattedNumber = formattedNumber.replace(/[^0-9]/g, '');
+            let formattedNumber = number.replace(/[^0-9]/g, '');
             if (formattedNumber.startsWith('0')) {
                 formattedNumber = '62' + formattedNumber.substring(1);
             }
@@ -214,13 +264,11 @@ app.post('/send-message', async (req, res) => {
                 formattedNumber += '@c.us';
             }
 
-            console.log(`Sending message to ${formattedNumber}...`);
-            await client.sendMessage(formattedNumber, message);
-            
-            console.log(`Success sending to ${formattedNumber}`);
+            console.log(`[web] Sending message to ${formattedNumber}...`);
+            await sessionData.client.sendMessage(formattedNumber, message);
             results.push({ number: number, formatted: formattedNumber, success: true });
         } catch (error) {
-            console.error(`Error sending to ${number}:`, error.message);
+            console.error(`[web] Error sending to ${number}:`, error.message);
             results.push({ number: number, success: false, error: error.message });
         }
     }
@@ -233,10 +281,8 @@ app.post('/send-message', async (req, res) => {
 });
 
 // Serve Frontend Static Files
-// Karena semua sekarang di root, React build folder-nya ada di ./dist
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Catch-all route
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
