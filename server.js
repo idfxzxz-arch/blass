@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
+dotenv.config();
+import TelegramBot from 'node-telegram-bot-api';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode';
@@ -63,6 +66,99 @@ client.on('disconnected', (reason) => {
 
 // Start the client
 client.initialize();
+
+// Initialize Telegram Bot
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ALLOWED_TELEGRAM_ID = process.env.ALLOWED_TELEGRAM_ID;
+
+let bot = null;
+if (TELEGRAM_BOT_TOKEN) {
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+    console.log('Telegram Bot initialized.');
+
+    bot.onText(/\/(start|help)/, (msg) => {
+        const chatId = msg.chat.id;
+        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) {
+            return bot.sendMessage(chatId, '⛔ Anda tidak diizinkan menggunakan bot ini.');
+        }
+        const helpText = `*WhatsApp Sender Bot*\n\n` +
+            `/status - Cek status WhatsApp\n` +
+            `/qr - Dapatkan QR Code login\n` +
+            `/send <nomor> <pesan> - Kirim pesan WA\n` +
+            `Contoh: /send 0812345678,0898765432 Halo ini pesan test!`;
+        bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    });
+
+    bot.onText(/\/status/, (msg) => {
+        const chatId = msg.chat.id;
+        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
+        
+        bot.sendMessage(chatId, isConnected ? '✅ WhatsApp Terhubung.' : '❌ WhatsApp Terputus. Ketik /qr untuk login.');
+    });
+
+    bot.onText(/\/qr/, async (msg) => {
+        const chatId = msg.chat.id;
+        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
+
+        if (isConnected) {
+            return bot.sendMessage(chatId, '✅ WhatsApp sudah terhubung, tidak perlu scan QR.');
+        }
+        if (!currentQR) {
+            return bot.sendMessage(chatId, '⏳ QR Code belum siap, silakan tunggu sebentar dan coba lagi.');
+        }
+
+        try {
+            const base64Data = currentQR.replace(/^data:image\/png;base64,/, "");
+            const imageBuffer = Buffer.from(base64Data, 'base64');
+            bot.sendPhoto(chatId, imageBuffer, { caption: 'Scan QR Code ini menggunakan WhatsApp Anda.' });
+        } catch (error) {
+            console.error('Error sending QR via Telegram:', error);
+            bot.sendMessage(chatId, 'Gagal mengirim QR Code.');
+        }
+    });
+
+    bot.onText(/\/send\s+([\d,\s\+]+)\s+(.+)/, async (msg, match) => {
+        const chatId = msg.chat.id;
+        if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
+
+        if (!isConnected) {
+            return bot.sendMessage(chatId, '❌ WhatsApp belum terhubung. Ketik /qr untuk login.');
+        }
+
+        const toMatch = match[1];
+        const message = match[2];
+
+        const recipients = toMatch.split(/[\s,]+/).map(n => n.trim()).filter(n => n);
+        if (recipients.length === 0) {
+            return bot.sendMessage(chatId, 'Format nomor tidak valid.');
+        }
+
+        bot.sendMessage(chatId, `⏳ Sedang memproses pengiriman ke ${recipients.length} nomor...`);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let number of recipients) {
+            try {
+                let formattedNumber = number.replace(/[^0-9]/g, '');
+                if (formattedNumber.startsWith('0')) {
+                    formattedNumber = '62' + formattedNumber.substring(1);
+                }
+                if (!formattedNumber.endsWith('@c.us')) {
+                    formattedNumber += '@c.us';
+                }
+
+                await client.sendMessage(formattedNumber, message);
+                successCount++;
+            } catch (error) {
+                console.error(`Telegram send error to ${number}:`, error.message);
+                failCount++;
+            }
+        }
+
+        bot.sendMessage(chatId, `✅ *Selesai!*\nBerhasil: ${successCount}\nGagal: ${failCount}`, { parse_mode: 'Markdown' });
+    });
+}
 
 // API Endpoints
 
