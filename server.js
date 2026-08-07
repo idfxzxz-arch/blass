@@ -56,8 +56,11 @@ function createClient(clientId, telegramChatId = null, phoneNumber = null) {
         if (phoneNumber && !sessionData.pairingRequested) {
             sessionData.pairingRequested = true;
             try {
-                // Ensure number is digits only
-                const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+                // Ensure number is digits only and has country code
+                let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+                if (cleanNumber.startsWith('0')) {
+                    cleanNumber = '62' + cleanNumber.substring(1);
+                }
                 console.log(`[${clientId}] Requesting pairing code for ${cleanNumber}...`);
                 const code = await client.requestPairingCode(cleanNumber);
                 if (telegramChatId && bot) {
