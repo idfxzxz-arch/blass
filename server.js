@@ -21,14 +21,15 @@ app.use(express.json());
 const MAX_SLOTS = 2;
 const sessions = new Map(); 
 
-function createClient(clientId, telegramChatId = null) {
+function createClient(clientId, telegramChatId = null, phoneNumber = null) {
     if (sessions.has(clientId)) return sessions.get(clientId);
 
     const sessionData = {
         client: null,
         isConnected: false,
         currentQR: null,
-        statusText: 'Initializing...'
+        statusText: 'Initializing...',
+        pairingRequested: false
     };
     sessions.set(clientId, sessionData);
 
@@ -50,13 +51,33 @@ function createClient(clientId, telegramChatId = null) {
     sessionData.client = client;
 
     client.on('qr', async (qr) => {
-        console.log(`[${clientId}] QR Code received.`);
+        console.log(`[${clientId}] QR Code / Auth request received.`);
+        
+        if (phoneNumber && !sessionData.pairingRequested) {
+            sessionData.pairingRequested = true;
+            try {
+                // Ensure number is digits only
+                const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+                console.log(`[${clientId}] Requesting pairing code for ${cleanNumber}...`);
+                const code = await client.requestPairingCode(cleanNumber);
+                if (telegramChatId && bot) {
+                    bot.sendMessage(telegramChatId, `🔗 *Kode Tautan Anda: ${code}*\n\nBuka WhatsApp > Tautkan Perangkat > Tautkan dengan nomor telepon > Masukkan kode di atas.`, { parse_mode: 'Markdown' });
+                }
+            } catch (error) {
+                console.error(`[${clientId}] Error requesting pairing code:`, error);
+                if (telegramChatId && bot) {
+                    bot.sendMessage(telegramChatId, `❌ Gagal meminta kode tautan. Pastikan nomor HP benar (tanpa +) dan coba lagi.`);
+                }
+            }
+            return;
+        }
+
         try {
             sessionData.currentQR = await qrcode.toDataURL(qr);
             sessionData.isConnected = false;
             sessionData.statusText = 'Menunggu Scan QR';
 
-            if (telegramChatId && bot) {
+            if (telegramChatId && bot && !phoneNumber) {
                 const base64Data = sessionData.currentQR.replace(/^data:image\/png;base64,/, "");
                 const imageBuffer = Buffer.from(base64Data, 'base64');
                 bot.sendPhoto(telegramChatId, imageBuffer, { caption: 'Scan QR Code ini menggunakan WhatsApp Anda.' }).catch(e => console.error(e));
@@ -114,21 +135,24 @@ if (TELEGRAM_BOT_TOKEN) {
     bot.onText(/\/(start|help)/, (msg) => {
         const chatId = msg.chat.id;
         const helpText = `*WhatsApp Sender Bot (Sistem Slot)*\n\n` +
-            `/login <kode_rahasia> - Mengambil slot dan mendapatkan QR Code\n` +
+            `/login <kode_rahasia> [nomor_hp] - Dapatkan QR / Kode Tautan\n` +
             `/status - Cek status WhatsApp Anda\n` +
             `/send <nomor> <pesan> - Kirim pesan WA\n` +
             `/logout - Logout dan melepaskan slot\n\n` +
+            `Contoh scan QR: \`/login rahasia123\`\n` +
+            `Contoh tanpa HP ke-2 (Kode): \`/login rahasia123 628123456789\`\n\n` +
             `Bot ini maksimal melayani ${MAX_SLOTS} orang bersamaan.`;
         bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
     });
 
-    bot.onText(/\/login(?:\s+(.+))?/, async (msg, match) => {
+    bot.onText(/\/login(?:\s+([^\s]+))?(?:\s+([^\s]+))?/, async (msg, match) => {
         const chatId = msg.chat.id;
         const clientId = chatId.toString();
         const code = match ? match[1] : null;
+        const phoneNumber = match ? match[2] : null;
 
         if (SECURITY_CODE && code !== SECURITY_CODE) {
-            return bot.sendMessage(chatId, '⛔ Kode keamanan salah atau tidak dimasukkan.\nCara penggunaan: `/login <kode_rahasia>`', { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, '⛔ Kode keamanan salah atau tidak dimasukkan.\nCara penggunaan: `/login <kode_rahasia> [nomor_hp]`', { parse_mode: 'Markdown' });
         }
 
         if (sessions.has(clientId)) {
@@ -139,8 +163,8 @@ if (TELEGRAM_BOT_TOKEN) {
             return bot.sendMessage(chatId, '⛔ Maaf, semua slot saat ini sedang penuh. Silakan coba lagi nanti jika ada yang /logout.');
         }
 
-        bot.sendMessage(chatId, '⏳ Mengalokasikan slot dan membuka browser... Mohon tunggu sekitar 20-30 detik untuk memunculkan QR.');
-        createClient(clientId, chatId);
+        bot.sendMessage(chatId, phoneNumber ? '⏳ Mengalokasikan slot... Mohon tunggu untuk mendapatkan Kode Tautan.' : '⏳ Mengalokasikan slot... Mohon tunggu untuk memunculkan QR Code.');
+        createClient(clientId, chatId, phoneNumber);
     });
 
     bot.onText(/\/logout/, async (msg) => {
