@@ -194,7 +194,7 @@ if (TELEGRAM_BOT_TOKEN) {
         bot.sendMessage(chatId, sessionData.isConnected ? '✅ WhatsApp Terhubung.' : `⏳ Status: ${sessionData.statusText}`);
     });
 
-    bot.onText(/\/send\s+([\d,\s\+]+)\s+(.+)/, async (msg, match) => {
+    bot.onText(/\/send\s+([\d,\s\+]+)\s+([\s\S]+)/, async (msg, match) => {
         const chatId = msg.chat.id;
         const clientId = chatId.toString();
 
