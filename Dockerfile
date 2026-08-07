@@ -33,8 +33,8 @@ COPY . .
 # Build Vite frontend
 RUN npm run build
 
-# Expose port (Render otomatis memberikan port lewat ENV PORT)
-EXPOSE 5000
+# Expose port (Hugging Face / Render)
+EXPOSE 7860
 
 # Start script
 CMD ["npm", "start"]
