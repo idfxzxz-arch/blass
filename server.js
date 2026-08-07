@@ -68,8 +68,8 @@ client.on('disconnected', (reason) => {
 client.initialize();
 
 // Initialize Telegram Bot
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const ALLOWED_TELEGRAM_ID = process.env.ALLOWED_TELEGRAM_ID;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.trim() : null;
+const ALLOWED_TELEGRAM_ID = process.env.ALLOWED_TELEGRAM_ID ? process.env.ALLOWED_TELEGRAM_ID.trim() : null;
 
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
@@ -78,7 +78,9 @@ if (TELEGRAM_BOT_TOKEN) {
 
     bot.onText(/\/(start|help)/, (msg) => {
         const chatId = msg.chat.id;
+        console.log(`[Telegram] Command /start received from Chat ID: ${chatId}`);
         if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) {
+            console.log(`[Telegram] Blocked /start from unauthorized ID: ${chatId}`);
             return bot.sendMessage(chatId, '⛔ Anda tidak diizinkan menggunakan bot ini.');
         }
         const helpText = `*WhatsApp Sender Bot*\n\n` +
@@ -91,6 +93,7 @@ if (TELEGRAM_BOT_TOKEN) {
 
     bot.onText(/\/status/, (msg) => {
         const chatId = msg.chat.id;
+        console.log(`[Telegram] Command /status received from Chat ID: ${chatId}`);
         if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
         
         bot.sendMessage(chatId, isConnected ? '✅ WhatsApp Terhubung.' : '❌ WhatsApp Terputus. Ketik /qr untuk login.');
@@ -98,6 +101,7 @@ if (TELEGRAM_BOT_TOKEN) {
 
     bot.onText(/\/qr/, async (msg) => {
         const chatId = msg.chat.id;
+        console.log(`[Telegram] Command /qr received from Chat ID: ${chatId}`);
         if (ALLOWED_TELEGRAM_ID && chatId.toString() !== ALLOWED_TELEGRAM_ID) return;
 
         if (isConnected) {
