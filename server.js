@@ -104,6 +104,7 @@ function destroyClient(clientId) {
 
 // Initialize Telegram Bot
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.trim() : null;
+const SECURITY_CODE = process.env.SECURITY_CODE ? process.env.SECURITY_CODE.trim() : null;
 
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
@@ -113,7 +114,7 @@ if (TELEGRAM_BOT_TOKEN) {
     bot.onText(/\/(start|help)/, (msg) => {
         const chatId = msg.chat.id;
         const helpText = `*WhatsApp Sender Bot (Sistem Slot)*\n\n` +
-            `/login - Mengambil slot dan mendapatkan QR Code\n` +
+            `/login <kode_rahasia> - Mengambil slot dan mendapatkan QR Code\n` +
             `/status - Cek status WhatsApp Anda\n` +
             `/send <nomor> <pesan> - Kirim pesan WA\n` +
             `/logout - Logout dan melepaskan slot\n\n` +
@@ -121,9 +122,14 @@ if (TELEGRAM_BOT_TOKEN) {
         bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
     });
 
-    bot.onText(/\/login/, async (msg) => {
+    bot.onText(/\/login(?:\s+(.+))?/, async (msg, match) => {
         const chatId = msg.chat.id;
         const clientId = chatId.toString();
+        const code = match ? match[1] : null;
+
+        if (SECURITY_CODE && code !== SECURITY_CODE) {
+            return bot.sendMessage(chatId, '⛔ Kode keamanan salah atau tidak dimasukkan.\nCara penggunaan: `/login <kode_rahasia>`', { parse_mode: 'Markdown' });
+        }
 
         if (sessions.has(clientId)) {
             return bot.sendMessage(chatId, '✅ Anda sudah memiliki sesi aktif. Ketik /status atau /logout.');
