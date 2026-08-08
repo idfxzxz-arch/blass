@@ -3,10 +3,20 @@ import axios from 'axios';
 import { Send, CheckCircle2, XCircle, History, Trash2, Loader2, Phone, MessageSquare, QrCode, RefreshCcw, Upload } from 'lucide-react';
 
 function App() {
+  // Web Token state
+  const [webToken, setWebToken] = useState(() => localStorage.getItem('web-token') || '');
+  const [tempToken, setTempToken] = useState('');
+
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
   const [qrCode, setQrCode] = useState(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+  const [qrError, setQrError] = useState(null);
+
+  // Configure axios to always send token
+  const axiosInstance = axios.create({
+    headers: { 'x-web-token': webToken }
+  });
 
   // Form state
   const [to, setTo] = useState('');
@@ -25,16 +35,23 @@ function App() {
 
   // Check connection status and get QR code
   const checkStatus = async () => {
+    if (!webToken) {
+      setIsCheckingStatus(false);
+      return;
+    }
     try {
-      const res = await axios.get('/status');
+      const res = await axiosInstance.get('/status');
       setIsConnected(res.data.connected);
+      setQrError(null);
       
       if (!res.data.connected) {
         // Fetch QR if disconnected
         try {
-          const qrRes = await axios.get('/qr');
+          const qrRes = await axiosInstance.get('/qr');
           if (qrRes.data.success && qrRes.data.qr) {
             setQrCode(qrRes.data.qr);
+          } else if (qrRes.data.error) {
+             setQrError(qrRes.data.error);
           }
         } catch (e) {
           console.log('Menunggu QR Code...');
@@ -43,17 +60,22 @@ function App() {
     } catch (error) {
       console.error('Failed to check status', error);
       setIsConnected(false);
+      if (error.response && error.response.status === 401) {
+          handleLogout();
+      }
     } finally {
       setIsCheckingStatus(false);
     }
   };
 
   useEffect(() => {
-    checkStatus();
-    // Poll status every 5 seconds
-    const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    if (webToken) {
+        setIsCheckingStatus(true);
+        checkStatus();
+        const interval = setInterval(checkStatus, 5000);
+        return () => clearInterval(interval);
+    }
+  }, [webToken]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -81,7 +103,7 @@ function App() {
     try {
       const numbers = to.split(/[\s,]+/).map(n => n.trim()).filter(n => n);
       
-      const response = await axios.post('/send-message', {
+      const response = await axiosInstance.post('/send-message', {
         to: numbers,
         message
       });
@@ -117,6 +139,66 @@ function App() {
     }
   };
 
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (tempToken.trim()) {
+      const token = tempToken.trim();
+      localStorage.setItem('web-token', token);
+      setWebToken(token);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (confirm('Apakah Anda yakin ingin logout dan menutup sesi WhatsApp ini?')) {
+        try {
+            await axiosInstance.post('/logout');
+        } catch (e) {
+            console.error('Logout failed', e);
+        }
+        localStorage.removeItem('web-token');
+        setWebToken('');
+        setIsConnected(false);
+        setQrCode(null);
+    }
+  };
+
+  // Token Login Screen
+  if (!webToken) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex justify-center items-center font-sans p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100">
+          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Phone className="w-8 h-8 text-blue-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-2 text-center">Web Login</h2>
+          <p className="text-sm text-slate-500 mb-6 text-center">
+            Masukkan ID/Token sesi Anda. Token yang berbeda akan membuka ruang kerja WhatsApp yang terpisah.
+          </p>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Token Sesi</label>
+              <input
+                type="text"
+                required
+                placeholder="Contoh: KARYAWAN-1"
+                className="block w-full rounded-xl border-slate-200 bg-slate-50 border p-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors text-slate-900"
+                value={tempToken}
+                onChange={(e) => setTempToken(e.target.value)}
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 px-4 rounded-xl shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+            >
+              Masuk ke Dashboard
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   // Loading Screen
   if (isCheckingStatus && !qrCode && !isConnected) {
     return (
@@ -141,7 +223,12 @@ function App() {
           </p>
 
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 flex justify-center items-center min-h-[250px]">
-            {qrCode ? (
+            {qrError ? (
+                <div className="text-center text-red-500 flex flex-col items-center">
+                    <XCircle className="w-8 h-8 mb-2" />
+                    <span className="text-sm font-medium">{qrError}</span>
+                </div>
+            ) : qrCode ? (
               <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64 object-contain" />
             ) : (
               <div className="text-center text-slate-400 flex flex-col items-center">
@@ -151,13 +238,21 @@ function App() {
             )}
           </div>
           
-          <button 
-            onClick={checkStatus}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
-          >
-            <RefreshCcw className="w-4 h-4" />
-            Muat Ulang Status
-          </button>
+          <div className="flex gap-2">
+              <button 
+                onClick={checkStatus}
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
+              >
+                <RefreshCcw className="w-4 h-4" />
+                Muat Ulang
+              </button>
+              <button 
+                onClick={handleLogout}
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-red-700 bg-red-100 hover:bg-red-200 transition-colors"
+              >
+                Ganti Token
+              </button>
+          </div>
         </div>
       </div>
     );
@@ -168,16 +263,25 @@ function App() {
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-4xl mx-auto space-y-8">
         
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight flex items-center justify-center gap-3">
-            <Send className="w-10 h-10 text-green-500" />
-            WhatsApp Sender
-          </h1>
-          <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-semibold">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            Terhubung ke WhatsApp
+        <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex items-center gap-4 mb-4 sm:mb-0">
+              <div className="w-12 h-12 bg-green-100 rounded-full flex justify-center items-center">
+                  <Send className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                  <h1 className="text-xl font-bold text-slate-900">WhatsApp Sender</h1>
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                      Terhubung sebagai <span className="font-semibold text-slate-700">{webToken}</span>
+                  </div>
+              </div>
           </div>
+          <button 
+              onClick={handleLogout}
+              className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium transition-colors"
+          >
+              Logout & Hapus Sesi
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

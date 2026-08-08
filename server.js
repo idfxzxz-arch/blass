@@ -281,20 +281,32 @@ if (TELEGRAM_BOT_TOKEN) {
     });
 }
 
-// API Endpoints for Web UI (uses 'web' slot, bypassing MAX_SLOTS to keep it working)
+function getWebClientId(req) {
+    const token = req.headers['x-web-token'];
+    if (!token) return null;
+    return `web_${token.trim()}`;
+}
 
 app.get('/status', (req, res) => {
-    const sessionData = sessions.get('web');
+    const clientId = getWebClientId(req);
+    if (!clientId) return res.status(401).json({ connected: false, error: 'Token required' });
+
+    const sessionData = sessions.get(clientId);
     res.json({
         connected: sessionData ? sessionData.isConnected : false
     });
 });
 
 app.get('/qr', (req, res) => {
-    let sessionData = sessions.get('web');
+    const clientId = getWebClientId(req);
+    if (!clientId) return res.status(401).json({ success: false, error: 'Token required' });
+
+    let sessionData = sessions.get(clientId);
     if (!sessionData) {
-        // Create Web session on demand (we don't count it against telegram slots to avoid breaking UI)
-        sessionData = createClient('web');
+        if (sessions.size >= MAX_SLOTS) {
+            return res.json({ success: false, error: 'Maksimal slot (2 sesi) sudah penuh. Harap tunggu ada yang logout.' });
+        }
+        sessionData = createClient(clientId);
     }
 
     if (sessionData.isConnected) {
@@ -307,7 +319,10 @@ app.get('/qr', (req, res) => {
 });
 
 app.post('/send-message', async (req, res) => {
-    const sessionData = sessions.get('web');
+    const clientId = getWebClientId(req);
+    if (!clientId) return res.status(401).json({ success: false, error: 'Token required' });
+
+    const sessionData = sessions.get(clientId);
     if (!sessionData || !sessionData.isConnected) {
         return res.status(403).json({ success: false, error: 'WhatsApp client is not connected' });
     }
@@ -336,11 +351,11 @@ app.post('/send-message', async (req, res) => {
                 formattedNumber += '@c.us';
             }
 
-            console.log(`[web] Sending message to ${formattedNumber}...`);
+            console.log(`[${clientId}] Sending message to ${formattedNumber}...`);
             await sessionData.client.sendMessage(formattedNumber, message);
             results.push({ number: number, formatted: formattedNumber, success: true });
         } catch (error) {
-            console.error(`[web] Error sending to ${number}:`, error.message);
+            console.error(`[${clientId}] Error sending to ${number}:`, error.message);
             results.push({ number: number, success: false, error: error.message });
         }
     }
@@ -350,6 +365,17 @@ app.post('/send-message', async (req, res) => {
         message: 'Proses pengiriman selesai',
         results
     });
+});
+
+app.post('/logout', (req, res) => {
+    const clientId = getWebClientId(req);
+    if (!clientId) return res.status(401).json({ success: false, error: 'Token required' });
+
+    if (sessions.has(clientId)) {
+        destroyClient(clientId);
+        return res.json({ success: true, message: 'Berhasil logout' });
+    }
+    return res.json({ success: true, message: 'Tidak ada sesi aktif' });
 });
 
 // Serve Frontend Static Files
