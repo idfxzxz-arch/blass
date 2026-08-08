@@ -13,6 +13,10 @@ function App() {
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [qrError, setQrError] = useState(null);
 
+  // Modal states
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
+
   // Configure axios to always send token
   const axiosInstance = axios.create({
     headers: { 'x-web-token': webToken }
@@ -135,10 +139,13 @@ function App() {
     }
   };
 
-  const clearHistory = () => {
-    if (confirm('Hapus semua riwayat pesan?')) {
-      setHistory([]);
-    }
+  const handleClearHistory = () => {
+    setShowClearModal(true);
+  };
+
+  const confirmClearHistory = () => {
+    setHistory([]);
+    setShowClearModal(false);
   };
 
   const handleLogin = (e) => {
@@ -150,18 +157,21 @@ function App() {
     }
   };
 
-  const handleLogout = async () => {
-    if (confirm('Apakah Anda yakin ingin logout dan menutup sesi WhatsApp ini?')) {
-        try {
-            await axiosInstance.post('/logout');
-        } catch (e) {
-            console.error('Logout failed', e);
-        }
-        localStorage.removeItem('web-token');
-        setWebToken('');
-        setIsConnected(false);
-        setQrCode(null);
+  const handleLogout = () => {
+      setShowLogoutModal(true);
+  };
+
+  const confirmLogout = async () => {
+    try {
+        await axiosInstance.post('/logout');
+    } catch (e) {
+        console.error('Logout failed', e);
     }
+    localStorage.removeItem('web-token');
+    setWebToken('');
+    setIsConnected(false);
+    setQrCode(null);
+    setShowLogoutModal(false);
   };
 
   // Token Login Screen
@@ -256,6 +266,20 @@ function App() {
               </button>
           </div>
         </div>
+
+        {/* Logout Modal */}
+        {showLogoutModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-300">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl transform scale-100 transition-transform duration-300">
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Konfirmasi Logout</h3>
+              <p className="text-slate-500 text-sm mb-6">Apakah Anda yakin ingin mengganti token dan menutup sesi WhatsApp ini?</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowLogoutModal(false)} className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold transition-colors">Batal</button>
+                <button onClick={confirmLogout} className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold transition-colors shadow-sm shadow-red-200">Ya, Logout</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -387,7 +411,7 @@ function App() {
               </h2>
               {history.length > 0 && (
                 <button 
-                  onClick={clearHistory}
+                  onClick={handleClearHistory}
                   className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors tooltip"
                   title="Hapus riwayat"
                 >
@@ -395,7 +419,6 @@ function App() {
                 </button>
               )}
             </div>
-            
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50/30">
               {history.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
@@ -435,6 +458,39 @@ function App() {
           </div>
           
         </div>
+
+        {/* Modals for Messaging Screen */}
+        {showLogoutModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-300">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl transform scale-100 transition-transform duration-300">
+              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4">
+                  <XCircle className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Konfirmasi Logout</h3>
+              <p className="text-slate-500 text-sm mb-6">Apakah Anda yakin ingin logout dan menghapus sesi Anda dari server?</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowLogoutModal(false)} className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold transition-colors">Batal</button>
+                <button onClick={confirmLogout} className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold transition-colors shadow-sm shadow-red-200">Ya, Logout</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showClearModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-300">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl transform scale-100 transition-transform duration-300">
+              <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mb-4">
+                  <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Hapus Riwayat</h3>
+              <p className="text-slate-500 text-sm mb-6">Semua riwayat pengiriman pesan akan dihapus permanen. Lanjutkan?</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowClearModal(false)} className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold transition-colors">Batal</button>
+                <button onClick={confirmClearHistory} className="flex-1 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-semibold transition-colors shadow-sm shadow-orange-200">Ya, Hapus</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
