@@ -26,13 +26,13 @@ function App() {
   // Check connection status and get QR code
   const checkStatus = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/status');
+      const res = await axios.get('/status');
       setIsConnected(res.data.connected);
       
       if (!res.data.connected) {
         // Fetch QR if disconnected
         try {
-          const qrRes = await axios.get('http://localhost:5000/qr');
+          const qrRes = await axios.get('/qr');
           if (qrRes.data.success && qrRes.data.qr) {
             setQrCode(qrRes.data.qr);
           }
@@ -81,7 +81,7 @@ function App() {
     try {
       const numbers = to.split(/[\s,]+/).map(n => n.trim()).filter(n => n);
       
-      const response = await axios.post('http://localhost:5000/send-message', {
+      const response = await axios.post('/send-message', {
         to: numbers,
         message
       });
