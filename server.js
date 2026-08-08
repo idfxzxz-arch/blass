@@ -129,11 +129,35 @@ function destroyClient(clientId) {
 // Initialize Telegram Bot
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.trim() : null;
 const SECURITY_CODE = process.env.SECURITY_CODE ? process.env.SECURITY_CODE.trim() : null;
+const WEB_APP_URL = process.env.WEB_APP_URL ? process.env.WEB_APP_URL.trim() : null;
 
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
     bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
     console.log('Telegram Bot initialized.');
+
+    async function processLoginRequest(chatId, clientId, code, phoneNumber) {
+        if (SECURITY_CODE && code !== SECURITY_CODE) {
+            return bot.sendMessage(chatId, '⛔ Kode keamanan salah atau tidak dimasukkan.\nCara penggunaan: `/login <kode_rahasia> [nomor_hp]`', { parse_mode: 'Markdown' });
+        }
+
+        if (sessions.has(clientId)) {
+            return bot.sendMessage(chatId, '✅ Anda sudah memiliki sesi aktif. Ketik /status atau /logout.', {
+                reply_markup: { remove_keyboard: true }
+            });
+        }
+
+        if (sessions.size >= MAX_SLOTS) {
+            return bot.sendMessage(chatId, '⛔ Maaf, semua slot saat ini sedang penuh. Silakan coba lagi nanti jika ada yang /logout.', {
+                reply_markup: { remove_keyboard: true }
+            });
+        }
+
+        bot.sendMessage(chatId, phoneNumber ? '⏳ Mengalokasikan slot... Mohon tunggu untuk mendapatkan Kode Tautan.' : '⏳ Mengalokasikan slot... Mohon tunggu untuk memunculkan QR Code.', {
+            reply_markup: { remove_keyboard: true }
+        });
+        createClient(clientId, chatId, phoneNumber);
+    }
 
     bot.onText(/\/(start|help)/, (msg) => {
         const chatId = msg.chat.id;
@@ -154,20 +178,35 @@ if (TELEGRAM_BOT_TOKEN) {
         const code = match ? match[1] : null;
         const phoneNumber = match ? match[2] : null;
 
-        if (SECURITY_CODE && code !== SECURITY_CODE) {
-            return bot.sendMessage(chatId, '⛔ Kode keamanan salah atau tidak dimasukkan.\nCara penggunaan: `/login <kode_rahasia> [nomor_hp]`', { parse_mode: 'Markdown' });
+        if (!code) {
+            if (!WEB_APP_URL) {
+                return bot.sendMessage(chatId, '⚠️ Mode Pop-up belum dikonfigurasi (WEB_APP_URL kosong).\nSilakan gunakan mode manual:\n`/login <kode_rahasia> [nomor_hp]`', { parse_mode: 'Markdown' });
+            }
+            return bot.sendMessage(chatId, 'Klik tombol di bawah ini untuk membuka layar login:', {
+                reply_markup: {
+                    keyboard: [[{ text: '🔑 Buka Layar Login', web_app: { url: `${WEB_APP_URL}/telegram-login.html` } }]],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            });
         }
 
-        if (sessions.has(clientId)) {
-            return bot.sendMessage(chatId, '✅ Anda sudah memiliki sesi aktif. Ketik /status atau /logout.');
-        }
+        await processLoginRequest(chatId, clientId, code, phoneNumber);
+    });
 
-        if (sessions.size >= MAX_SLOTS) {
-            return bot.sendMessage(chatId, '⛔ Maaf, semua slot saat ini sedang penuh. Silakan coba lagi nanti jika ada yang /logout.');
+    bot.on('message', async (msg) => {
+        if (msg.web_app_data) {
+            try {
+                const data = JSON.parse(msg.web_app_data.data);
+                if (data.type === 'LOGIN_REQUEST') {
+                    const chatId = msg.chat.id;
+                    const clientId = chatId.toString();
+                    await processLoginRequest(chatId, clientId, data.code, data.phone || null);
+                }
+            } catch (err) {
+                console.error('Error parsing web_app_data:', err);
+            }
         }
-
-        bot.sendMessage(chatId, phoneNumber ? '⏳ Mengalokasikan slot... Mohon tunggu untuk mendapatkan Kode Tautan.' : '⏳ Mengalokasikan slot... Mohon tunggu untuk memunculkan QR Code.');
-        createClient(clientId, chatId, phoneNumber);
     });
 
     bot.onText(/\/logout/, async (msg) => {
