@@ -51,7 +51,9 @@ function App() {
           if (qrRes.data.success && qrRes.data.qr) {
             setQrCode(qrRes.data.qr);
           } else if (qrRes.data.error) {
-             setQrError(qrRes.data.error);
+             if (qrRes.data.error !== 'QR not ready yet') {
+                 setQrError(qrRes.data.error);
+             }
           }
         } catch (e) {
           console.log('Menunggu QR Code...');
