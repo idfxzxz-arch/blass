@@ -129,7 +129,7 @@ function destroyClient(clientId) {
 // Initialize Telegram Bot
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.trim() : null;
 const SECURITY_CODE = process.env.SECURITY_CODE ? process.env.SECURITY_CODE.trim() : null;
-const WEB_APP_URL = process.env.WEB_APP_URL ? process.env.WEB_APP_URL.trim() : null;
+const WEB_APP_URL = process.env.WEB_APP_URL ? process.env.WEB_APP_URL.trim().replace(/\/+$/, '') : null;
 const ALLOWED_WEB_TOKENS = process.env.ALLOWED_WEB_TOKENS ? process.env.ALLOWED_WEB_TOKENS.split(',').map(t => t.trim()) : null;
 
 let bot = null;
