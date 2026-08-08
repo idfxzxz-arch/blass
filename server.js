@@ -322,7 +322,39 @@ app.get('/qr', (req, res) => {
     if (!sessionData.currentQR) {
         return res.json({ success: false, error: 'QR not ready yet' });
     }
-    res.json({ success: true, qr: sessionData.currentQR });
+    res.json({
+        success: true,
+        qr: sessionData.currentQR
+    });
+});
+
+app.post('/pairing-code', async (req, res) => {
+    const auth = getWebClientId(req);
+    if (!auth.valid) return res.status(401).json({ success: false, error: auth.error });
+    const clientId = auth.id;
+
+    const sessionData = sessions.get(clientId);
+    if (!sessionData || !sessionData.client) {
+        return res.status(400).json({ success: false, error: 'Klien belum diinisialisasi.' });
+    }
+
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) {
+        return res.status(400).json({ success: false, error: 'Nomor telepon wajib diisi.' });
+    }
+
+    try {
+        let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+        if (cleanNumber.startsWith('0')) {
+            cleanNumber = '62' + cleanNumber.substring(1);
+        }
+        
+        const code = await sessionData.client.requestPairingCode(cleanNumber);
+        res.json({ success: true, code });
+    } catch (err) {
+        console.error('Failed to request pairing code:', err);
+        res.status(500).json({ success: false, error: 'Gagal meminta kode tautan. Pastikan format nomor benar.' });
+    }
 });
 
 app.post('/send-message', async (req, res) => {

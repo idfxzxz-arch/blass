@@ -13,6 +13,13 @@ function App() {
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [qrError, setQrError] = useState(null);
 
+  // Pairing code state
+  const [pairingMode, setPairingMode] = useState(false);
+  const [pairingPhone, setPairingPhone] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingError, setPairingError] = useState(null);
+
   // Modal states
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
@@ -171,7 +178,28 @@ function App() {
     setWebToken('');
     setIsConnected(false);
     setQrCode(null);
+    setPairingMode(false);
+    setPairingCode('');
     setShowLogoutModal(false);
+  };
+
+  const requestPairingCode = async (e) => {
+      e.preventDefault();
+      if (!pairingPhone) return;
+      setPairingLoading(true);
+      setPairingError(null);
+      try {
+          const res = await axiosInstance.post('/pairing-code', { phoneNumber: pairingPhone });
+          if (res.data.success && res.data.code) {
+              setPairingCode(res.data.code);
+          } else {
+              setPairingError(res.data.error || 'Gagal mendapatkan kode tautan.');
+          }
+      } catch (err) {
+          setPairingError(err.response?.data?.error || 'Terjadi kesalahan jaringan.');
+      } finally {
+          setPairingLoading(false);
+      }
   };
 
   // Token Login Screen
@@ -230,26 +258,72 @@ function App() {
             <QrCode className="w-8 h-8 text-green-600" />
           </div>
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Login WhatsApp</h2>
-          <p className="text-sm text-slate-500 mb-8">
-            Buka WhatsApp di HP Anda &gt; Perangkat Taut &gt; Tautkan Perangkat, lalu scan QR ini.
+          <p className="text-sm text-slate-500 mb-6">
+            {pairingMode 
+                ? 'Masukkan nomor WhatsApp Anda untuk mendapatkan kode 8 digit.'
+                : 'Buka WhatsApp di HP Anda > Perangkat Taut > Tautkan Perangkat, lalu scan QR ini.'
+            }
           </p>
 
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 flex justify-center items-center min-h-[250px]">
-            {qrError ? (
-                <div className="text-center text-red-500 flex flex-col items-center">
-                    <XCircle className="w-8 h-8 mb-2" />
-                    <span className="text-sm font-medium">{qrError}</span>
-                </div>
-            ) : qrCode ? (
-              <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64 object-contain" />
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 flex justify-center items-center min-h-[250px]">
+            {pairingMode ? (
+                pairingCode ? (
+                    <div className="text-center w-full">
+                        <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide font-semibold">Kode Tautan Anda</p>
+                        <div className="text-3xl font-mono tracking-[0.2em] font-bold text-slate-800 bg-white p-4 rounded-xl border border-slate-200 shadow-inner">
+                            {pairingCode.substring(0,4)}-{pairingCode.substring(4)}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-4">Masukkan kode ini di aplikasi WhatsApp Anda.</p>
+                    </div>
+                ) : (
+                    <form onSubmit={requestPairingCode} className="w-full">
+                        <label className="block text-sm font-medium text-slate-700 text-left mb-1">Nomor WhatsApp</label>
+                        <input
+                            type="tel"
+                            required
+                            placeholder="Contoh: 628123456789"
+                            className="block w-full rounded-xl border-slate-200 bg-white border p-3 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-colors text-slate-900 mb-2"
+                            value={pairingPhone}
+                            onChange={(e) => setPairingPhone(e.target.value)}
+                        />
+                        {pairingError && <p className="text-xs text-red-500 text-left mb-3">{pairingError}</p>}
+                        <button
+                            type="submit"
+                            disabled={pairingLoading}
+                            className="w-full py-3 px-4 rounded-xl shadow-sm text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+                        >
+                            {pairingLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
+                            Dapatkan Kode
+                        </button>
+                    </form>
+                )
             ) : (
-              <div className="text-center text-slate-400 flex flex-col items-center">
-                <Loader2 className="w-8 h-8 animate-spin mb-2" />
-                <span className="text-sm">Menghasilkan QR Code...</span>
-              </div>
+                qrError ? (
+                    <div className="text-center text-red-500 flex flex-col items-center">
+                        <XCircle className="w-8 h-8 mb-2" />
+                        <span className="text-sm font-medium">{qrError}</span>
+                    </div>
+                ) : qrCode ? (
+                  <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64 object-contain" />
+                ) : (
+                  <div className="text-center text-slate-400 flex flex-col items-center">
+                    <Loader2 className="w-8 h-8 animate-spin mb-2" />
+                    <span className="text-sm">Menghasilkan QR Code...</span>
+                  </div>
+                )
             )}
           </div>
           
+          <div className="flex gap-2 mb-4">
+              <button 
+                onClick={() => { setPairingMode(!pairingMode); setPairingCode(''); setPairingError(null); }}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+              >
+                {pairingMode ? <QrCode className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
+                {pairingMode ? 'Kembali ke Scan QR' : 'Gunakan Nomor HP (Tautan)'}
+              </button>
+          </div>
+
           <div className="flex gap-2">
               <button 
                 onClick={checkStatus}
