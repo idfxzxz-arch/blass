@@ -130,6 +130,7 @@ function destroyClient(clientId) {
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.trim() : null;
 const SECURITY_CODE = process.env.SECURITY_CODE ? process.env.SECURITY_CODE.trim() : null;
 const WEB_APP_URL = process.env.WEB_APP_URL ? process.env.WEB_APP_URL.trim() : null;
+const ALLOWED_WEB_TOKENS = process.env.ALLOWED_WEB_TOKENS ? process.env.ALLOWED_WEB_TOKENS.split(',').map(t => t.trim()) : null;
 
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
@@ -283,23 +284,29 @@ if (TELEGRAM_BOT_TOKEN) {
 
 function getWebClientId(req) {
     const token = req.headers['x-web-token'];
-    if (!token) return null;
-    return `web_${token.trim()}`;
+    if (!token) return { valid: false, error: 'Token required' };
+    const trimmed = token.trim();
+    
+    if (ALLOWED_WEB_TOKENS && !ALLOWED_WEB_TOKENS.includes(trimmed)) {
+        return { valid: false, error: 'Token tidak terdaftar. Akses ditolak.' };
+    }
+    return { valid: true, id: `web_${trimmed}` };
 }
 
 app.get('/status', (req, res) => {
-    const clientId = getWebClientId(req);
-    if (!clientId) return res.status(401).json({ connected: false, error: 'Token required' });
+    const auth = getWebClientId(req);
+    if (!auth.valid) return res.status(401).json({ connected: false, error: auth.error });
 
-    const sessionData = sessions.get(clientId);
+    const sessionData = sessions.get(auth.id);
     res.json({
         connected: sessionData ? sessionData.isConnected : false
     });
 });
 
 app.get('/qr', (req, res) => {
-    const clientId = getWebClientId(req);
-    if (!clientId) return res.status(401).json({ success: false, error: 'Token required' });
+    const auth = getWebClientId(req);
+    if (!auth.valid) return res.status(401).json({ success: false, error: auth.error });
+    const clientId = auth.id;
 
     let sessionData = sessions.get(clientId);
     if (!sessionData) {
@@ -319,8 +326,9 @@ app.get('/qr', (req, res) => {
 });
 
 app.post('/send-message', async (req, res) => {
-    const clientId = getWebClientId(req);
-    if (!clientId) return res.status(401).json({ success: false, error: 'Token required' });
+    const auth = getWebClientId(req);
+    if (!auth.valid) return res.status(401).json({ success: false, error: auth.error });
+    const clientId = auth.id;
 
     const sessionData = sessions.get(clientId);
     if (!sessionData || !sessionData.isConnected) {
@@ -368,8 +376,9 @@ app.post('/send-message', async (req, res) => {
 });
 
 app.post('/logout', (req, res) => {
-    const clientId = getWebClientId(req);
-    if (!clientId) return res.status(401).json({ success: false, error: 'Token required' });
+    const auth = getWebClientId(req);
+    if (!auth.valid) return res.status(401).json({ success: false, error: auth.error });
+    const clientId = auth.id;
 
     if (sessions.has(clientId)) {
         destroyClient(clientId);
